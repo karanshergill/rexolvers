@@ -13,7 +13,7 @@ import (
 
 // config struct to hold source urls
 type Config struct {
-	SourceURLs []string `yaml:"sourceURLs"`
+	PublicSourceURLs []string `yaml:"publicSourceURLs"`
 }
 
 // read source urls from a config.yaml file
@@ -30,7 +30,7 @@ func readSourceURLs(filePath string) ([]string, error) {
 		return nil, fmt.Errorf("could not decode YAML content: %v", err)
 	}
 
-	return config.SourceURLs, nil
+	return config.PublicSourceURLs, nil
 }
 
 // fetch data from a url and return a slice of strings
