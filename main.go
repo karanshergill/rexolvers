@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -13,11 +16,58 @@ import (
 
 // config struct to hold source urls
 type Config struct {
-	PublicSourceURLs []string `yaml:"publicSourceURLs"`
+	PublicSourceURLs  []string `yaml:"publicSourceURLs"`
+	TrustedSourceURLs []string `yaml:"trustedSourceURLs"`
 }
 
-// read source urls from a config.yaml file
-func readSourceURLs(filePath string) ([]string, error) {
+// cross platform compatibility function to manage the sources file
+func getConfigPath() string {
+	var configPath string
+	if runtime.GOOS == "windows" {
+		configPath = filepath.Join(os.Getenv("APPDATA"), "getresolvers", "config.yaml")
+	} else {
+		configPath = os.ExpandEnv("$HOME/.config/getresolvers/config.yaml")
+	}
+
+	// ensure the config directory exists
+	configDir := filepath.Dir(configPath)
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		os.MkdirAll(configDir, 0755)
+	}
+
+	// ensure the config file exists if it doesn't, copy the example config file
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// example config file path
+		sampleConfigPath := "config.yaml"
+		if _, err := os.Stat(sampleConfigPath); err == nil {
+			sourceFile, err := os.Open(sampleConfigPath)
+			if err == nil {
+				destFile, err := os.Create(configPath)
+				if err == nil {
+					_, err = io.Copy(destFile, sourceFile)
+					sourceFile.Close()
+					destFile.Close()
+					if err == nil {
+						fmt.Printf("Moved sample config file to %s\n", configPath)
+					} else {
+						fmt.Printf("Error copying sample config file: %v\n", err)
+					}
+				} else {
+					fmt.Printf("Error creating destination config file: %v\n", err)
+				}
+			} else {
+				fmt.Printf("Error opening sample config file: %v\n", err)
+			}
+		} else {
+			fmt.Println("Sample config file not found, skipping copy.")
+		}
+	}
+
+	return configPath
+}
+
+// read source urls from config.yaml
+func readSourceURLs(filePath string) (*Config, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("could not open YAML file: %v", err)
@@ -30,10 +80,10 @@ func readSourceURLs(filePath string) ([]string, error) {
 		return nil, fmt.Errorf("could not decode YAML content: %v", err)
 	}
 
-	return config.PublicSourceURLs, nil
+	return &config, nil
 }
 
-// fetch data from a url and return a slice of strings
+// fetch data from the source urls and return a slice of strings
 func fetchURLContent(url string) ([]string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -61,27 +111,8 @@ func fetchURLContent(url string) ([]string, error) {
 	return lines, nil
 }
 
-func processPublic(sourcesFile, outputFile string) error {
-	urls, err := readSourceURLs(sourcesFile)
-	if err != nil {
-		return fmt.Errorf("error reading source URLs: %v", err)
-	}
-
-	uniqueValues := make(map[string]struct{})
-
-	for _, url := range urls {
-		fmt.Printf("Fetching content from: %s\n", url)
-		lines, err := fetchURLContent(url)
-		if err != nil {
-			fmt.Printf("Error fetching URL: %v\n", err)
-			continue
-		}
-
-		for _, line := range lines {
-			uniqueValues[line] = struct{}{}
-		}
-	}
-
+// write the unique values to a text file
+func saveResolversToFile(uniqueValues map[string]struct{}, outputFile string) error {
 	file, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("error creating output file: %v", err)
@@ -101,12 +132,24 @@ func processPublic(sourcesFile, outputFile string) error {
 	return nil
 }
 
-func processTrusted(sourcesFile, outputFile string) error {
-	// Placeholder for processing trusted resolvers logic
-	fmt.Println("Processing trusted resolvers...")
-	// Future logic here
-	fmt.Println("Trusted resolvers processed (placeholder).")
-	return nil
+// process the resolvers from the source urls
+func processResolvers(urls []string, outputFile string) error {
+	uniqueValues := make(map[string]struct{})
+
+	for _, url := range urls {
+		fmt.Printf("Fetching content from: %s\n", url)
+		lines, err := fetchURLContent(url)
+		if err != nil {
+			fmt.Printf("Error fetching URL: %v\n", err)
+			continue
+		}
+
+		for _, line := range lines {
+			uniqueValues[line] = struct{}{}
+		}
+	}
+
+	return saveResolversToFile(uniqueValues, outputFile)
 }
 
 func main() {
@@ -116,28 +159,31 @@ func main() {
 	allFlag := flag.Bool("all", false, "Process both public and trusted resolvers")
 	flag.Parse()
 
-	sourcesFile := "config.yaml"
+	sourcesFile := getConfigPath()
+
+	// read configuration
+	config, err := readSourceURLs(sourcesFile)
+	if err != nil {
+		fmt.Printf("Error reading configuration: %v\n", err)
+		return
+	}
 
 	if *allFlag {
 		fmt.Println("Processing all resolvers...")
-		err := processPublic(sourcesFile, "public_resolvers.txt")
-		if err != nil {
+		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt"); err != nil {
 			fmt.Printf("Error processing public resolvers: %v\n", err)
 		}
-		err = processTrusted(sourcesFile, "trusted_resolvers.txt")
-		if err != nil {
+		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt"); err != nil {
 			fmt.Printf("Error processing trusted resolvers: %v\n", err)
 		}
 	} else if *publicFlag {
 		fmt.Println("Processing public resolvers...")
-		err := processPublic(sourcesFile, "public_resolvers.txt")
-		if err != nil {
+		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt"); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	} else if *trustedFlag {
 		fmt.Println("Processing trusted resolvers...")
-		err := processTrusted(sourcesFile, "trusted_resolvers.txt")
-		if err != nil {
+		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt"); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	} else {
