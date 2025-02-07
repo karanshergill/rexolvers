@@ -24,9 +24,9 @@ type Config struct {
 func getConfigPath() string {
 	var configPath string
 	if runtime.GOOS == "windows" {
-		configPath = filepath.Join(os.Getenv("APPDATA"), "getresolvers", "config.yaml")
+		configPath = filepath.Join(os.Getenv("APPDATA"), "rexolvers", "config.yaml")
 	} else {
-		configPath = os.ExpandEnv("$HOME/.config/getresolvers/config.yaml")
+		configPath = os.ExpandEnv("$HOME/.config/rexolvers/config.yaml")
 	}
 
 	// ensure the config directory exists

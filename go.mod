@@ -1,4 +1,4 @@
-module getresolvers
+module rexolvers
 
 go 1.23.2
 
