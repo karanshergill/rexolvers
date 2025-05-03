@@ -1,4 +1,4 @@
-module rexolvers
+module github.com/karanshergill/rexolvers
 
 go 1.23.2
 
