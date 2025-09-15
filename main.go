@@ -104,6 +104,22 @@ func getResolverStats(db *sql.DB) error {
 	return nil
 }
 
+func clearResolversByType(db *sql.DB, resolverType string) error {
+	deleteSQL := "DELETE FROM resolvers WHERE resolver_type = ?"
+	result, err := db.Exec(deleteSQL, resolverType)
+	if err != nil {
+		return fmt.Errorf("error clearing %s resolvers: %v", resolverType, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %v", err)
+	}
+
+	fmt.Printf("Cleared %d existing %s resolvers from database\n", rowsAffected, resolverType)
+	return nil
+}
+
 // cross platform compatibility function to manage the sources file
 func getConfigPath() string {
 	var configPath string
@@ -218,6 +234,13 @@ func saveResolversToFile(uniqueValues map[string]struct{}, outputFile string) er
 
 // process the resolvers from the source urls
 func processResolvers(urls []string, outputFile string, resolverType string, db *sql.DB, saveToFile bool) error {
+	// Clear existing public resolvers from database before processing new ones
+	if db != nil && resolverType == "public" {
+		if err := clearResolversByType(db, "public"); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+		}
+	}
+
 	uniqueValues := make(map[string]struct{})
 
 	for _, url := range urls {
@@ -234,7 +257,10 @@ func processResolvers(urls []string, outputFile string, resolverType string, db 
 			// Save to database if db connection provided
 			if db != nil {
 				if err := saveResolverToDB(db, line, resolverType, url); err != nil {
-					fmt.Printf("Warning: Could not save resolver %s to database: %v\n", line, err)
+					// Only show warning for trusted resolvers (duplicates expected for public after clearing)
+					if resolverType == "trusted" {
+						fmt.Printf("Warning: Could not save resolver %s to database: %v\n", line, err)
+					}
 				}
 			}
 		}
