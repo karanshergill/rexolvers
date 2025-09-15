@@ -106,13 +106,6 @@ The tool uses a YAML configuration file located at:
 massdns -r resolvers.txt -t A domains.txt
 ```
 
-### Use with subfinder
-```bash
-# Export trusted resolvers
-./rexolvers --list=trusted > trusted_resolvers.txt
-subfinder -d example.com -r trusted_resolvers.txt
-```
-
 ### Query database directly
 ```bash
 # Using sqlite3 command line
