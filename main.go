@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,6 +20,88 @@ import (
 type Config struct {
 	PublicSourceURLs  []string `yaml:"publicSourceURLs"`
 	TrustedSourceURLs []string `yaml:"trustedSourceURLs"`
+}
+
+// database functions
+func initDatabase() (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", "./resolvers.db")
+	if err != nil {
+		return nil, fmt.Errorf("error opening database: %v", err)
+	}
+
+	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS resolvers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip_address TEXT UNIQUE NOT NULL,
+		resolver_type TEXT NOT NULL,
+		source_url TEXT,
+		added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		return nil, fmt.Errorf("error creating table: %v", err)
+	}
+
+	return db, nil
+}
+
+func saveResolverToDB(db *sql.DB, ipAddress, resolverType, sourceURL string) error {
+	insertSQL := `INSERT OR IGNORE INTO resolvers (ip_address, resolver_type, source_url) VALUES (?, ?, ?)`
+	_, err := db.Exec(insertSQL, ipAddress, resolverType, sourceURL)
+	return err
+}
+
+func getResolversFromDB(db *sql.DB, resolverType string) ([]string, error) {
+	var query string
+	var args []interface{}
+
+	if resolverType == "all" {
+		query = "SELECT ip_address FROM resolvers ORDER BY ip_address"
+	} else {
+		query = "SELECT ip_address FROM resolvers WHERE resolver_type = ? ORDER BY ip_address"
+		args = []interface{}{resolverType}
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var resolvers []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return nil, err
+		}
+		resolvers = append(resolvers, ip)
+	}
+
+	return resolvers, nil
+}
+
+func getResolverStats(db *sql.DB) error {
+	query := "SELECT resolver_type, COUNT(*) FROM resolvers GROUP BY resolver_type"
+	rows, err := db.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fmt.Println("Database Statistics:")
+	total := 0
+	for rows.Next() {
+		var resolverType string
+		var count int
+		if err := rows.Scan(&resolverType, &count); err != nil {
+			return err
+		}
+		fmt.Printf("  %s: %d resolvers\n", resolverType, count)
+		total += count
+	}
+	fmt.Printf("  total: %d resolvers\n", total)
+	return nil
 }
 
 // cross platform compatibility function to manage the sources file
@@ -133,7 +217,7 @@ func saveResolversToFile(uniqueValues map[string]struct{}, outputFile string) er
 }
 
 // process the resolvers from the source urls
-func processResolvers(urls []string, outputFile string) error {
+func processResolvers(urls []string, outputFile string, resolverType string, db *sql.DB, saveToFile bool) error {
 	uniqueValues := make(map[string]struct{})
 
 	for _, url := range urls {
@@ -146,10 +230,23 @@ func processResolvers(urls []string, outputFile string) error {
 
 		for _, line := range lines {
 			uniqueValues[line] = struct{}{}
+
+			// Save to database if db connection provided
+			if db != nil {
+				if err := saveResolverToDB(db, line, resolverType, url); err != nil {
+					fmt.Printf("Warning: Could not save resolver %s to database: %v\n", line, err)
+				}
+			}
 		}
 	}
 
-	return saveResolversToFile(uniqueValues, outputFile)
+	// Save to file if requested
+	if saveToFile {
+		return saveResolversToFile(uniqueValues, outputFile)
+	}
+
+	fmt.Printf("Processed %d unique %s resolvers\n", len(uniqueValues), resolverType)
+	return nil
 }
 
 func main() {
@@ -157,7 +254,49 @@ func main() {
 	publicFlag := flag.Bool("public", false, "Process public resolvers")
 	trustedFlag := flag.Bool("trusted", false, "Process trusted resolvers")
 	allFlag := flag.Bool("all", false, "Process both public and trusted resolvers")
+	dbFlag := flag.Bool("db", false, "Save resolvers to database")
+	fileFlag := flag.Bool("file", true, "Save resolvers to file (default: true)")
+	listFlag := flag.String("list", "", "List resolvers from database (public|trusted|all)")
+	statsFlag := flag.Bool("stats", false, "Show database statistics")
 	flag.Parse()
+
+	// Handle list operation first
+	if *listFlag != "" {
+		db, err := initDatabase()
+		if err != nil {
+			fmt.Printf("Error initializing database: %v\n", err)
+			return
+		}
+		defer db.Close()
+
+		resolvers, err := getResolversFromDB(db, *listFlag)
+		if err != nil {
+			fmt.Printf("Error retrieving resolvers from database: %v\n", err)
+			return
+		}
+
+		fmt.Printf("Found %d %s resolvers in database:\n", len(resolvers), *listFlag)
+		for _, resolver := range resolvers {
+			fmt.Println(resolver)
+		}
+		return
+	}
+
+	// Handle stats operation
+	if *statsFlag {
+		db, err := initDatabase()
+		if err != nil {
+			fmt.Printf("Error initializing database: %v\n", err)
+			return
+		}
+		defer db.Close()
+
+		if err := getResolverStats(db); err != nil {
+			fmt.Printf("Error retrieving statistics: %v\n", err)
+			return
+		}
+		return
+	}
 
 	sourcesFile := getConfigPath()
 
@@ -168,25 +307,41 @@ func main() {
 		return
 	}
 
+	// Initialize database if needed
+	var db *sql.DB
+	if *dbFlag {
+		db, err = initDatabase()
+		if err != nil {
+			fmt.Printf("Error initializing database: %v\n", err)
+			return
+		}
+		defer db.Close()
+		fmt.Println("Database initialized successfully")
+	}
+
 	if *allFlag {
 		fmt.Println("Processing all resolvers...")
-		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt"); err != nil {
+		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt", "public", db, *fileFlag); err != nil {
 			fmt.Printf("Error processing public resolvers: %v\n", err)
 		}
-		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt"); err != nil {
+		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt", "trusted", db, *fileFlag); err != nil {
 			fmt.Printf("Error processing trusted resolvers: %v\n", err)
 		}
 	} else if *publicFlag {
 		fmt.Println("Processing public resolvers...")
-		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt"); err != nil {
+		if err := processResolvers(config.PublicSourceURLs, "public_resolvers.txt", "public", db, *fileFlag); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	} else if *trustedFlag {
 		fmt.Println("Processing trusted resolvers...")
-		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt"); err != nil {
+		if err := processResolvers(config.TrustedSourceURLs, "trusted_resolvers.txt", "trusted", db, *fileFlag); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	} else {
-		fmt.Println("Please specify either --public, --trusted, or --all.")
+		fmt.Println("Usage:")
+		fmt.Println("  Process resolvers: --public, --trusted, or --all")
+		fmt.Println("  List from database: --list=public|trusted|all")
+		fmt.Println("  Show statistics: --stats")
+		fmt.Println("  Optional: --db (save to database), --file=false (skip file output)")
 	}
 }
