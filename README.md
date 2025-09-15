@@ -1,17 +1,6 @@
-# rexolvers
+# Rexolvers
 
-🚀 More resolvers = More resolved subdomains = More potential vulnerabilities to exploit!
-
-A lightweight DNS resolver aggregation tool written in Go that collects DNS resolver IP addresses from multiple public and trusted sources. Supports both file and database storage for integration with other security tools.
-
-## Features
-
-- **Multi-source aggregation**: Fetches resolvers from multiple sources
-- **Dual storage**: Save to text files and/or SQLite database
-- **Type classification**: Separates public and trusted resolvers
-- **Deduplication**: Automatically removes duplicate IP addresses
-- **Cross-platform**: Works on Windows, macOS, and Linux
-- **Lightweight**: Single binary with minimal dependencies
+A lightweight DNS resolver aggregation tool that collects DNS resolver IP addresses from multiple public and trusted sources.
 
 ## Installation
 
@@ -107,17 +96,6 @@ CREATE TABLE resolvers (
 The tool uses a YAML configuration file located at:
 - **Linux/macOS**: `$HOME/.config/rexolvers/config.yaml`
 - **Windows**: `%APPDATA%\rexolvers\config.yaml`
-
-### Default Sources
-
-**Public Sources:**
-- proabiral/Fresh-Resolvers
-- trickest/resolvers
-- janmasarik/resolvers
-- Phasip/resolvers
-
-**Trusted Sources:**
-- trickest/resolvers-trusted
 
 ## Integration Examples
 
