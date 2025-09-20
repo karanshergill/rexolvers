@@ -11,9 +11,20 @@ cd rexolvers
 go build -o rexolvers .
 ```
 
+### Docker
+```bash
+# Build the Docker image
+docker build -t rexolvers .
+
+# Or pull from a registry (if available)
+docker pull your-registry/rexolvers:latest
+```
+
 ## Usage
 
-### Basic Operations
+### Local Binary
+
+#### Basic Operations
 
 **Process public resolvers:**
 ```bash
@@ -30,7 +41,7 @@ go build -o rexolvers .
 ./rexolvers --all
 ```
 
-### Database Operations
+#### Database Operations
 
 **Save to database:**
 ```bash
@@ -57,6 +68,81 @@ go build -o rexolvers .
 **Show database statistics:**
 ```bash
 ./rexolvers --stats
+```
+
+### Docker
+
+Docker usage allows you to run the application in a containerized environment and export the database to your host machine.
+
+#### Setup
+```bash
+# Create directory for database export
+mkdir -p ./docker-output
+
+# Build the Docker image
+docker build -t rexolvers .
+```
+
+#### Basic Operations
+
+**Process all resolvers and save to database:**
+```bash
+docker run -v $(pwd)/docker-output:/app/data rexolvers --all --db
+```
+
+**Process public resolvers only:**
+```bash
+docker run -v $(pwd)/docker-output:/app/data rexolvers --public --db
+```
+
+**Process trusted resolvers only:**
+```bash
+docker run -v $(pwd)/docker-output:/app/data rexolvers --trusted --db
+```
+
+#### Database Operations
+
+**List resolvers from exported database:**
+```bash
+# List all resolvers
+docker run -v $(pwd)/docker-output:/app/data rexolvers --list=all
+
+# List trusted resolvers
+docker run -v $(pwd)/docker-output:/app/data rexolvers --list=trusted
+
+# List public resolvers
+docker run -v $(pwd)/docker-output:/app/data rexolvers --list=public
+```
+
+**Show database statistics:**
+```bash
+docker run -v $(pwd)/docker-output:/app/data rexolvers --stats
+```
+
+#### Accessing Exported Database
+
+After running with the `--db` flag, the SQLite database will be available at:
+```
+./docker-output/resolvers.db
+```
+
+You can then:
+- Copy this database file anywhere you need it
+- Query it directly with sqlite3: `sqlite3 ./docker-output/resolvers.db`
+- Use it with other tools that accept SQLite databases
+
+#### Docker Examples
+```bash
+# Complete workflow - fetch data and export database
+docker build -t rexolvers .
+mkdir -p ./docker-output
+docker run -v $(pwd)/docker-output:/app/data rexolvers --all --db
+
+# Check what was collected
+docker run -v $(pwd)/docker-output:/app/data rexolvers --stats
+
+# Export trusted resolvers for use with other tools
+docker run -v $(pwd)/docker-output:/app/data rexolvers --list=trusted > trusted_resolvers.txt
 ```
 
 ### Command Line Flags
