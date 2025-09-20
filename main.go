@@ -24,7 +24,11 @@ type Config struct {
 
 // database functions
 func initDatabase() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "./resolvers.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./resolvers.db"
+	}
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("error opening database: %v", err)
 	}
